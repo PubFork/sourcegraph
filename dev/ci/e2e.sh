@@ -38,8 +38,7 @@ socat tcp-listen:7080,reuseaddr,fork system:"docker exec -i $CONTAINER socat std
 
 # Provide a HTTPS reverse-proxy
 caddy reverse-proxy --to localhost:7080 &
-# Impossible to provide node a custom CA while running as root, this is a workaround
-export NODE_TLS_REJECT_UNAUTHORIZED=0
+
 
 set +e
 timeout 60s bash -c "until curl --output /dev/null --silent --head --fail $URL; do
@@ -63,5 +62,5 @@ echo "--- yarn run test-e2e"
 pushd web
 # `-pix_fmt yuv420p` makes a QuickTime-compatible mp4.
 ffmpeg -y -f x11grab -video_size 1280x1024 -i "$DISPLAY" -pix_fmt yuv420p e2e.mp4 > ffmpeg.log 2>&1 &
-env SOURCEGRAPH_BASE_URL="$URL" PERCY_ON=true ./node_modules/.bin/percy exec -- yarn run test-e2e
+env IGNORE_HTTPS_ERRORS="true" SOURCEGRAPH_BASE_URL="$URL" PERCY_ON=true ./node_modules/.bin/percy exec -- yarn run test-e2e
 popd
