@@ -36,6 +36,9 @@ docker exec "$CONTAINER" apk add --no-cache socat
 # docker exec as the transport.
 socat tcp-listen:7080,reuseaddr,fork system:"docker exec -i $CONTAINER socat stdio 'tcp:localhost:7080'" &
 
+google-chrome --no-sandbox --headless --screenshot www.google.com
+rm screenshot.png
+
 # Provide a HTTPS reverse-proxy
 caddy reverse-proxy --to http://localhost:7080 2> >(sed 's/^/[caddy2]: /g') > >(sed 's/^/[caddy2]: /g') &
 
