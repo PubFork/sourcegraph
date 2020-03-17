@@ -20,6 +20,7 @@ fi
 export DOCKER_HOST="$E2E_DOCKER_HOST"
 export DOCKER_PASSWORD="$E2E_DOCKER_PASSWORD"
 export DOCKER_USERNAME="$E2E_DOCKER_USERNAME"
+CADDY_DATA_DIR="$HOME/.local/share/caddy"
 
 echo "--- Copying $IMAGE to the dedicated e2e testing node..."
 docker pull $IMAGE
@@ -37,6 +38,8 @@ socat tcp-listen:7080,reuseaddr,fork system:"docker exec -i $CONTAINER socat std
 
 # Provide a HTTPS reverse-proxy
 caddy reverse-proxy --to localhost:7080 &
+# Add Caddy certificate authority for node
+export NODE_EXTRA_CA_CERTS="${CADDY_DATA_DIR}/pki/authorities/local/root.crt"
 
 set +e
 timeout 60s bash -c "until curl --output /dev/null --silent --head --fail $URL; do
