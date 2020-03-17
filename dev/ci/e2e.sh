@@ -37,8 +37,7 @@ docker exec "$CONTAINER" apk add --no-cache socat
 socat tcp-listen:7080,reuseaddr,fork system:"docker exec -i $CONTAINER socat stdio 'tcp:localhost:7080'" &
 
 # Provide a HTTPS reverse-proxy
-caddy reverse-proxy --to localhost:7080 &
-
+caddy reverse-proxy --to http://localhost:7080 2> >(sed 's/^/[caddy2]: /g') > >(sed 's/^/[caddy2]: /g') &
 
 set +e
 timeout 60s bash -c "until curl --output /dev/null --silent --head --fail $URL; do
