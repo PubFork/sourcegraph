@@ -1,8 +1,15 @@
 import * as lsp from 'vscode-languageserver-protocol'
 import * as pgModels from '../../shared/models/pg'
 
-/** A location with the dump that contains it. */
+/** A location with the identifier of the dump that contains it. */
 export interface InternalLocation {
+    dumpId: pgModels.DumpId
+    path: string
+    range: lsp.Range
+}
+
+/** A location with the dump that contains it. */
+export interface ResolvedInternalLocation {
     dump: pgModels.LsifDump
     path: string
     range: lsp.Range
@@ -12,6 +19,28 @@ export interface InternalLocation {
 export class OrderedLocationSet {
     private seen = new Set<string>()
     private order: InternalLocation[] = []
+
+    /**
+     * Create a new ordered location set.
+     *
+     * @param locations A set of locations used to seed the set.
+     * @param trusted Whether the given locations are already deduplicated.
+     */
+    constructor(locations?: InternalLocation[], trusted = false) {
+        if (!locations) {
+            return
+        }
+
+        if (trusted) {
+            this.order = Array.from(locations)
+            this.seen = new Set(this.order.map(makeKey))
+            return
+        }
+
+        for (const location of locations) {
+            this.push(location)
+        }
+    }
 
     /** The deduplicated locations in insertion order. */
     public get locations(): InternalLocation[] {
@@ -33,7 +62,7 @@ export class OrderedLocationSet {
 /** Makes a unique string representation of this location. */
 function makeKey(location: InternalLocation): string {
     return [
-        location.dump.id,
+        location.dumpId,
         location.path,
         location.range.start.line,
         location.range.start.character,

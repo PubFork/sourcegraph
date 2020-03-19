@@ -1,10 +1,8 @@
 import * as sqliteModels from '../../shared/models/sqlite'
 import * as lsp from 'vscode-languageserver-protocol'
-import * as settings from '../settings'
 import * as pgModels from '../../shared/models/pg'
 import { addTags, logSpan, TracingContext } from '../../shared/tracing'
-import { ConnectionCache, DocumentCache, ResultChunkCache } from './cache'
-import { Database, sortMonikers } from './database'
+import { Database } from './database'
 import { dbFilename } from '../../shared/paths'
 import { mustGet } from '../../shared/maps'
 import { DumpManager } from '../../shared/store/dumps'
@@ -18,10 +16,11 @@ import {
     RemoteDumpReferenceCursor,
     SameDumpReferenceCursor,
 } from './cursor'
-import { InternalLocation } from './location'
+import { InternalLocation, ResolvedInternalLocation } from './location'
+import { isEqual, uniqWith } from 'lodash'
 
 interface PaginatedInternalLocations {
-    locations: InternalLocation[]
+    locations: ResolvedInternalLocation[]
     newCursor?: ReferencePaginationCursor
 }
 
@@ -30,10 +29,6 @@ interface PaginatedInternalLocations {
  * multiple repositories or commits. For single-dump logic, see the `Database` class.
  */
 export class Backend {
-    private connectionCache = new ConnectionCache(settings.CONNECTION_CACHE_CAPACITY)
-    private documentCache = new DocumentCache(settings.DOCUMENT_CACHE_CAPACITY)
-    private resultChunkCache = new ResultChunkCache(settings.RESULT_CHUNK_CACHE_CAPACITY)
-
     /**
      * Create a new `Backend`.
      *
@@ -41,12 +36,15 @@ export class Backend {
      * @param dumpManager The dumps manager instance.
      * @param dependencyManager The dependency manager instance.
      * @param frontendUrl The url of the frontend internal API.
+     * @param createDatabase Function used to create a database instance from a dump.
      */
     constructor(
         private storageRoot: string,
         private dumpManager: DumpManager,
         private dependencyManager: DependencyManager,
-        private frontendUrl: string
+        private frontendUrl: string,
+        private createDatabase: (dump: pgModels.LsifDump) => Database = dump =>
+            new Database(dump.id, dbFilename(this.storageRoot, dump.id))
     ) {}
 
     /**
@@ -84,7 +82,7 @@ export class Backend {
         position: lsp.Position,
         dumpId?: number,
         ctx: TracingContext = {}
-    ): Promise<InternalLocation[] | undefined> {
+    ): Promise<ResolvedInternalLocation[] | undefined> {
         const closestDumpAndDatabase = await this.closestDatabase(repositoryId, commit, path, dumpId, ctx)
         if (!closestDumpAndDatabase) {
             if (ctx.logger) {
@@ -102,7 +100,7 @@ export class Backend {
         const dbDefinitions = await database.definitions(pathInDb, position, newCtx)
         const definitions = dbDefinitions.map(loc => locationFromDatabase(dump.root, loc))
         if (definitions.length > 0) {
-            return definitions
+            return this.resolveLocations(definitions)
         }
 
         // Try to find definitions in other dumps
@@ -123,7 +121,7 @@ export class Backend {
             for (const moniker of monikers) {
                 if (moniker.kind === 'import') {
                     // This symbol was imported from another database. See if we have
-                    // an remote definition for it.
+                    // a remote definition for it.
 
                     const { locations: remoteDefinitions } = await this.lookupMoniker(
                         document,
@@ -133,7 +131,7 @@ export class Backend {
                         ctx
                     )
                     if (remoteDefinitions.length > 0) {
-                        return remoteDefinitions
+                        return this.resolveLocations(remoteDefinitions)
                     }
                 } else {
                     // This symbol was not imported from another database. We search the definitions
@@ -148,7 +146,7 @@ export class Backend {
                     )
                     const localDefinitions = monikerResults.map(loc => locationFromDatabase(dump.root, loc))
                     if (localDefinitions.length > 0) {
-                        return localDefinitions
+                        return this.resolveLocations(localDefinitions)
                     }
                 }
             }
@@ -407,28 +405,19 @@ export class Backend {
                             cursor,
                             ctx
                         ),
-                    async (): Promise<ReferencePaginationCursor | undefined> => {
-                        if (await this.hasRemoteReferences(repositoryId, cursor, ctx)) {
-                            // If there are no remote consumers of this symbol, do not
-                            // make a cursor for the next phase as it would only be a
-                            // single empty page.
-                            return {
-                                dumpId: cursor.dumpId,
-                                phase: 'remote-repo',
-                                scheme: cursor.scheme,
-                                identifier: cursor.identifier,
-                                name: cursor.name,
-                                version: cursor.version,
-                                dumpIds: [],
-                                totalDumpsWhenBatching: 0,
-                                skipDumpsWhenBatching: 0,
-                                skipDumpsInBatch: 0,
-                                skipResultsInDump: 0,
-                            }
-                        }
-
-                        return undefined
-                    }
+                    (): ReferencePaginationCursor | undefined => ({
+                        dumpId: cursor.dumpId,
+                        phase: 'remote-repo',
+                        scheme: cursor.scheme,
+                        identifier: cursor.identifier,
+                        name: cursor.name,
+                        version: cursor.version,
+                        dumpIds: [],
+                        totalDumpsWhenBatching: 0,
+                        skipDumpsWhenBatching: 0,
+                        skipDumpsInBatch: 0,
+                        skipResultsInDump: 0,
+                    })
                 )
             }
 
@@ -494,7 +483,7 @@ export class Backend {
         const newCursor = { ...cursor, skipResults: cursor.skipResults + limit }
 
         return {
-            locations: slicedLocations.map(loc => locationFromDatabase(dump.root, loc)),
+            locations: await this.resolveLocations(slicedLocations.map(loc => locationFromDatabase(dump.root, loc))),
             newCursor: newOffset < locationSet.locations.length ? newCursor : undefined,
         }
     }
@@ -539,7 +528,7 @@ export class Backend {
                 const newCursor = { ...cursor, skipResults: cursor.skipResults + limit }
 
                 return {
-                    locations,
+                    locations: await this.resolveLocations(locations),
                     newCursor: newOffset < count ? newCursor : undefined,
                 }
             }
@@ -636,31 +625,6 @@ export class Backend {
     }
 
     /**
-     * Determine if the moniker and package identified by the pagination cursor has at least one
-     * remote repository containing that definition. We use this to determine if we should move
-     * on to the next phase without doing it unconditionally and yielding an empty last page.
-     *
-     * @param repositoryId The repository identifier.
-     * @param cursor The pagination cursor.
-     * @param ctx The tracing context.
-     */
-    private async hasRemoteReferences(
-        repositoryId: number,
-        cursor: RemoteDumpReferenceCursor,
-        ctx: TracingContext = {}
-    ): Promise<boolean> {
-        const { totalCount: remoteTotalCount } = await this.dependencyManager.getPackageReferences({
-            ...cursor,
-            repositoryId,
-            limit: 1,
-            offset: 0,
-            ctx,
-        })
-
-        return remoteTotalCount > 0
-    }
-
-    /**
      * Query the given dumps for references to the given moniker.
      *
      * @param args Parameter bag.
@@ -739,7 +703,7 @@ export class Backend {
                 }
 
                 return {
-                    locations: locations.map(loc => locationFromDatabase(dump.root, loc)),
+                    locations: await this.resolveLocations(locations.map(loc => locationFromDatabase(dump.root, loc))),
                     newCursor:
                         newResultOffset < count
                             ? nextCursor
@@ -919,21 +883,6 @@ export class Backend {
     }
 
     /**
-     * Create a database instance backed by the given dump.
-     *
-     * @param dump The dump.
-     */
-    private createDatabase(dump: pgModels.LsifDump): Database {
-        return new Database(
-            this.connectionCache,
-            this.documentCache,
-            this.resultChunkCache,
-            dump,
-            dbFilename(this.storageRoot, dump.id)
-        )
-    }
-
-    /**
      * Create a database for the dump with the given identifier.
      *
      * @param dumpId The dump id.
@@ -965,6 +914,23 @@ export class Backend {
         const dumpAndDatabase = await this.getDumpAndDatabaseById(dumpId)
         return dumpAndDatabase?.database.getDocumentByPath(path, ctx)
     }
+
+    /** Bulk populate the dump model for internal locations. */
+    private async resolveLocations(locations: InternalLocation[]): Promise<ResolvedInternalLocation[]> {
+        const dumps = await this.dumpManager.getDumpsByIds(Array.from(new Set(locations.map(({ dumpId }) => dumpId))))
+
+        const resolvedLocations: ResolvedInternalLocation[] = []
+        for (const { dumpId, path, range } of locations) {
+            const dump = dumps.get(dumpId)
+            if (!dump) {
+                continue
+            }
+
+            resolvedLocations.push({ dump, path, range })
+        }
+
+        return resolvedLocations
+    }
 }
 
 /**
@@ -979,15 +945,50 @@ function pathToDatabase(root: string, path: string): string {
 }
 
 /**
- * Converts a location in a dump to the corresponding location in the repository.
+ * Converts a location in a dump to the corresponding location in the repository.2
  *
  * @param root The root of all files in the dump.
  * @param location The original location.
  */
-function locationFromDatabase(root: string, { dump, path, range }: InternalLocation): InternalLocation {
+function locationFromDatabase(root: string, { dumpId, path, range }: InternalLocation): InternalLocation {
     return {
-        dump,
+        dumpId,
         path: `${root}${path}`,
         range,
     }
+}
+
+// The order to present monikers in when organized by kinds
+const monikerKindPreferences = ['import', 'local', 'export']
+
+// A map from moniker schemes to schemes that subsume them. The schemes
+// identified by keys should be removed from the sets of monikers that
+// also contain the scheme identified by that key's value.
+const subsumedMonikers = new Map([
+    ['go', 'gomod'],
+    ['tsc', 'npm'],
+])
+
+/**
+ * Normalize the set of monikers by filtering, sorting, and removing
+ * duplicates from the list based on the moniker kind and scheme values.
+ *
+ * @param monikers The list of monikers.
+ */
+export function sortMonikers(monikers: sqliteModels.MonikerData[]): sqliteModels.MonikerData[] {
+    // Deduplicate monikers. This can happen with long chains of result
+    // sets where monikers are applied several times to an aliased symbol.
+    monikers = uniqWith(monikers, isEqual)
+
+    // Remove monikers subsumed by the presence of another. For example,
+    // if we have an `npm` moniker in this list, we want to remove all
+    // `tsc` monikers as they are duplicate by construction in lsif-tsc.
+    monikers = monikers.filter(a => {
+        const by = subsumedMonikers.get(a.scheme)
+        return !(by && monikers.some(b => b.scheme === by))
+    })
+
+    // Sort monikers by kind
+    monikers.sort((a, b) => monikerKindPreferences.indexOf(a.kind) - monikerKindPreferences.indexOf(b.kind))
+    return monikers
 }

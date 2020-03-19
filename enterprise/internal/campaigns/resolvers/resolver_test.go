@@ -446,7 +446,7 @@ func TestCampaigns(t *testing.T) {
 					ServiceType: "github",
 				},
 				ReviewState: "APPROVED",
-				CheckState:  "PENDING",
+				CheckState:  "PASSED",
 				Events: ChangesetEventConnection{
 					TotalCount: 57,
 				},
@@ -1202,11 +1202,7 @@ func TestCampaignPlanResolver(t *testing.T) {
 	store := ee.NewStoreWithClock(dbconn.Global, clock)
 
 	user := createTestUser(ctx, t)
-	plan := &campaigns.CampaignPlan{
-		CampaignType: "patch",
-		Arguments:    "{}",
-		UserID:       user.ID,
-	}
+	plan := &campaigns.CampaignPlan{UserID: user.ID}
 	err := store.CreateCampaignPlan(ctx, plan)
 	if err != nil {
 		t.Fatal(err)
@@ -1216,8 +1212,6 @@ func TestCampaignPlanResolver(t *testing.T) {
 	for _, repo := range rs {
 		job := &campaigns.CampaignJob{
 			CampaignPlanID: plan.ID,
-			StartedAt:      now,
-			FinishedAt:     now,
 			RepoID:         repo.ID,
 			Rev:            testingRev,
 			BaseRef:        "master",
