@@ -40,6 +40,7 @@ import { CampaignTitleField } from './form/CampaignTitleField'
 import { CampaignChangesets } from './changesets/CampaignChangesets'
 import { CampaignDiffStat } from './CampaignDiffStat'
 import { pluralize } from '../../../../../shared/src/util/strings'
+import { eventLogger } from '../../../tracking/eventLogger'
 
 export type CampaignUIMode = 'viewing' | 'editing' | 'saving' | 'deleting' | 'closing'
 
@@ -115,6 +116,14 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
     const changesetUpdates = useMemo(() => new Subject<void>(), [])
 
     const [campaign, setCampaign] = useState<Campaign | null>()
+
+    useEffect(() => {
+        if (campaignID) {
+            return eventLogger.logViewEvent('CampaignDetailsPage')
+        }
+        eventLogger.logViewEvent('NewCampaignPage')
+    }, [campaignID])
+
     useEffect(() => {
         if (!campaignID) {
             return
@@ -264,6 +273,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
             setMode('viewing')
             setAlertError(undefined)
             campaignUpdates.next()
+            eventLogger.log('NewDraftCampaignCreated')
         } catch (err) {
             setMode('editing')
             setAlertError(asError(err))
@@ -277,6 +287,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
             setMode('viewing')
             setAlertError(undefined)
             campaignUpdates.next()
+            eventLogger.log('CampaignPublished')
         } catch (err) {
             setMode('editing')
             setAlertError(asError(err))
@@ -299,6 +310,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
                 setName(newCampaign.name)
                 setDescription(newCampaign.description)
                 unblockHistoryRef.current()
+                eventLogger.log('CampaignUpdated')
                 history.push(`/campaigns/${newCampaign.id}`)
             } else {
                 const createdCampaign = await createCampaign({
@@ -309,6 +321,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
                     branch: specifyingBranchAllowed ? branch : undefined,
                 })
                 unblockHistoryRef.current()
+                eventLogger.log('CampaignCreated')
                 history.push(`/campaigns/${createdCampaign.id}`)
             }
             setMode('viewing')
@@ -327,6 +340,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
         unblockHistoryRef.current = history.block(discardChangesMessage)
         setMode('editing')
         setAlertError(undefined)
+        eventLogger.logViewEvent('EditCampaignPage')
     }
 
     const onCancel: React.FormEventHandler = event => {
@@ -338,7 +352,6 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
         // clear query params
         history.replace(location.pathname)
         setMode('viewing')
-        setAlertError(undefined)
     }
 
     const onClose = async (closeChangesets: boolean): Promise<void> => {
@@ -348,6 +361,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
         setMode('closing')
         try {
             await closeCampaign(campaign!.id, closeChangesets)
+            eventLogger.log('CampaignClosed')
             campaignUpdates.next()
         } catch (err) {
             setAlertError(asError(err))
@@ -363,6 +377,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
         setMode('deleting')
         try {
             await deleteCampaign(campaign!.id, closeChangesets)
+            eventLogger.log('CampaignDeleted')
             history.push('/campaigns')
         } catch (err) {
             setAlertError(asError(err))
@@ -384,6 +399,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
         // we also check the campaign.changesets.totalCount, so an update to the campaign is required as well
         campaignUpdates.next()
         changesetUpdates.next()
+        eventLogger.log('CampaignChangesetAdded')
     }
 
     const author = campaign ? campaign.author : authenticatedUser
