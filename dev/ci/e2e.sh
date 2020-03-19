@@ -8,7 +8,7 @@ if [ -z "$IMAGE" ]; then
     exit 1
 fi
 
-URL="https://localhost"
+URL="http://localhost:7080"
 
 if curl --output /dev/null --silent --head --fail $URL; then
     echo "❌ Can't run a new Sourcegraph instance on $URL because another instance is already running."
@@ -20,7 +20,6 @@ fi
 export DOCKER_HOST="$E2E_DOCKER_HOST"
 export DOCKER_PASSWORD="$E2E_DOCKER_PASSWORD"
 export DOCKER_USERNAME="$E2E_DOCKER_USERNAME"
-CADDY_DATA_DIR="$HOME/.local/share/caddy"
 
 echo "--- Copying $IMAGE to the dedicated e2e testing node..."
 docker pull $IMAGE
@@ -35,12 +34,6 @@ docker exec "$CONTAINER" apk add --no-cache socat
 # can hit it. This is similar to port-forwarding via SSH tunneling, but uses
 # docker exec as the transport.
 socat tcp-listen:7080,reuseaddr,fork system:"docker exec -i $CONTAINER socat stdio 'tcp:localhost:7080'" &
-
-google-chrome --no-sandbox --headless --screenshot www.google.com
-rm screenshot.png
-
-# Provide a HTTPS reverse-proxy
-caddy reverse-proxy --to http://localhost:7080 2> >(sed 's/^/[caddy2]: /g') > >(sed 's/^/[caddy2]: /g') &
 
 set +e
 timeout 60s bash -c "until curl --output /dev/null --silent --head --fail $URL; do
@@ -64,5 +57,5 @@ echo "--- yarn run test-e2e"
 pushd web
 # `-pix_fmt yuv420p` makes a QuickTime-compatible mp4.
 ffmpeg -y -f x11grab -video_size 1280x1024 -i "$DISPLAY" -pix_fmt yuv420p e2e.mp4 > ffmpeg.log 2>&1 &
-env IGNORE_HTTPS_ERRORS="true" SOURCEGRAPH_BASE_URL="$URL" PERCY_ON=true ./node_modules/.bin/percy exec -- yarn run test-e2e
+env SOURCEGRAPH_BASE_URL="$URL" PERCY_ON=true ./node_modules/.bin/percy exec -- yarn run test-e2e
 popd

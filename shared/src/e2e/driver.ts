@@ -648,7 +648,6 @@ export async function createDriverForTest(options: DriverOptions): Promise<Drive
         ...options,
         args,
         headless: readEnvBoolean({ variable: 'HEADLESS', defaultValue: false }),
-        ignoreHTTPSErrors: readEnvBoolean({ variable: 'IGNORE_HTTPS_ERRORS', defaultValue: false }),
         defaultViewport: null,
     }
     let browser: puppeteer.Browser
