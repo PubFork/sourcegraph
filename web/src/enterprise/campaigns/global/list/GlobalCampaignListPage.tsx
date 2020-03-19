@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { queryCampaigns } from './backend'
 import AddIcon from 'mdi-react/AddIcon'
 import { Link } from '../../../../../../shared/src/components/Link'
@@ -36,35 +36,33 @@ const FILTERS: FilteredConnectionFilter[] = [
 /**
  * A list of all campaigns on the Sourcegraph instance.
  */
-export class GlobalCampaignListPage extends React.PureComponent<Props> {
-    public componentDidMount(): void {
+export const GlobalCampaignListPage: React.FunctionComponent<Props> = props => {
+    useEffect(() => {
         eventLogger.logViewEvent('CampaignsListPage')
-    }
+    }, [])
 
-    public render(): JSX.Element | null {
-        return (
-            <>
-                <h1>Campaigns</h1>
-                <p>Perform and track large-scale code changes</p>
+    return (
+        <>
+            <h1>Campaigns</h1>
+            <p>Perform and track large-scale code changes</p>
 
-                {this.props.authenticatedUser.siteAdmin && (
-                    <div className="text-right mb-1">
-                        <Link to="/campaigns/new" className="btn btn-primary">
-                            <AddIcon className="icon-inline" /> New campaign
-                        </Link>
-                    </div>
-                )}
+            {props.authenticatedUser.siteAdmin && (
+                <div className="text-right mb-1">
+                    <Link to="/campaigns/new" className="btn btn-primary">
+                        <AddIcon className="icon-inline" /> New campaign
+                    </Link>
+                </div>
+            )}
 
-                <FilteredConnection<CampaignNodeCampaign>
-                    {...this.props}
-                    nodeComponent={CampaignNode}
-                    queryConnection={queryCampaigns}
-                    hideSearch={true}
-                    filters={FILTERS}
-                    noun="campaign"
-                    pluralNoun="campaigns"
-                />
-            </>
-        )
-    }
+            <FilteredConnection<CampaignNodeCampaign>
+                {...props}
+                nodeComponent={CampaignNode}
+                queryConnection={queryCampaigns}
+                hideSearch={true}
+                filters={FILTERS}
+                noun="campaign"
+                pluralNoun="campaigns"
+            />
+        </>
+    )
 }
