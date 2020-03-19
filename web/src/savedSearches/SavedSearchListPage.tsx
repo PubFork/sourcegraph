@@ -14,6 +14,7 @@ import { NamespaceProps } from '../namespaces'
 import { deleteSavedSearch, fetchSavedSearches } from '../search/backend'
 import { PatternTypeProps } from '../search'
 import { ErrorAlert } from '../components/alerts'
+import { eventLogger } from '../tracking/eventLogger'
 
 interface NodeProps extends RouteComponentProps, Omit<PatternTypeProps, 'setPatternType'> {
     savedSearch: GQL.ISavedSearch
@@ -48,6 +49,7 @@ class SavedSearchNode extends React.PureComponent<NodeProps, NodeState> {
                     )
                 )
                 .subscribe(() => {
+                    eventLogger.log('SavedSearchDeleted')
                     this.setState({ isDeleting: false })
                     this.props.onDelete()
                 })
@@ -127,6 +129,7 @@ export class SavedSearchListPage extends React.Component<Props, State> {
                 )
                 .subscribe(newState => this.setState(newState as State))
         )
+        eventLogger.logViewEvent('SavedSearchListPage')
     }
 
     public render(): JSX.Element | null {
