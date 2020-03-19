@@ -349,6 +349,7 @@ export const CampaignDetails: React.FunctionComponent<Props> = ({
         // clear query params
         history.replace(location.pathname)
         setMode('viewing')
+        setAlertError(undefined)
     }
 
     const onClose = async (closeChangesets: boolean): Promise<void> => {
