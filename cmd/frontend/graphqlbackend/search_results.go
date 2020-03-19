@@ -1229,7 +1229,6 @@ func (r *searchResolver) doResults(ctx context.Context, forceOnlyResultType stri
 						// Still no results? Give up.
 						log15.Warn("Structural search gives up after more exhaustive attempt. Results may have been missed.")
 						fileCommon.limitHit = false // Ensure we don't display "Show more".
-
 					}
 				}
 				for _, r := range fileResults {
