@@ -16,7 +16,7 @@ ENV PATH="/opt/jsonnet:${PATH}"
 
 RUN ./build.sh
 
-FROM grafana/grafana:6.5.2@sha256:db5a3366567457127c705d01d980d593cd14e0458da44bcdb5ccf05b82877ab2 as production
+FROM grafana/grafana:6.7.0@sha256:e9897f8e237244f7c7accb97a3a11b09b76a8e6bb06bc4f8a099285c53f1b164 as production
 
 LABEL org.opencontainers.image.url=https://sourcegraph.com/
 LABEL org.opencontainers.image.source=https://github.com/sourcegraph/sourcegraph/
